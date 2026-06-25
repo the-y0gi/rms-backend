@@ -18,7 +18,11 @@ const modifierOptionSchema = new mongoose.Schema({
   isDefault: {
     type: Boolean,
     default: false,
-  }
+  },
+  modifierGroups: [{
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'ModifierGroup'
+  }]
 });
 
 // Virtual to map _id to id for frontend compatibility

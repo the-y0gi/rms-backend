@@ -59,7 +59,7 @@ exports.deleteCategory = async (id) => {
 
 exports.getAllModifierGroups = async () => {
   try {
-    return await ModifierGroup.find().sort({ createdAt: -1 });
+    return await ModifierGroup.find().populate('options.modifierGroups').sort({ createdAt: -1 });
   } catch (error) {
     logger.error(`Menu Service Error: getAllModifierGroups - ${error.message}`);
     throw error;
@@ -107,7 +107,12 @@ exports.getAllProducts = async () => {
   try {
     return await Product.find()
       .populate('categoryId')
-      .populate('modifierGroups')
+      .populate({
+        path: 'modifierGroups',
+        populate: {
+          path: 'options.modifierGroups'
+        }
+      })
       .sort({ name: 1 });
   } catch (error) {
     logger.error(`Menu Service Error: getAllProducts - ${error.message}`);
@@ -120,7 +125,12 @@ exports.createProduct = async (productData) => {
     const product = await Product.create(productData);
     return await Product.findById(product._id)
       .populate('categoryId')
-      .populate('modifierGroups');
+      .populate({
+        path: 'modifierGroups',
+        populate: {
+          path: 'options.modifierGroups'
+        }
+      });
   } catch (error) {
     logger.error(`Menu Service Error: createProduct - ${error.message}`);
     throw error;
@@ -131,7 +141,12 @@ exports.updateProduct = async (id, productData) => {
   try {
     const product = await Product.findByIdAndUpdate(id, productData, { new: true, runValidators: true })
       .populate('categoryId')
-      .populate('modifierGroups');
+      .populate({
+        path: 'modifierGroups',
+        populate: {
+          path: 'options.modifierGroups'
+        }
+      });
     if (!product) {
       throw new Error('Product not found.');
     }
@@ -161,7 +176,12 @@ exports.getPOSMenuFeed = async () => {
   try {
     const categories = await Category.find({ isActive: true }).sort({ displayOrder: 1 });
     const products = await Product.find({ isActive: true })
-      .populate('modifierGroups');
+      .populate({
+        path: 'modifierGroups',
+        populate: {
+          path: 'options.modifierGroups'
+        }
+      });
     
     return {
       categories: categories.map(cat => ({
@@ -193,7 +213,22 @@ exports.getPOSMenuFeed = async () => {
             name: opt.name,
             image: opt.image,
             price: opt.price,
-            isDefault: opt.isDefault
+            isDefault: opt.isDefault,
+            modifierGroups: opt.modifierGroups ? opt.modifierGroups.map(subG => ({
+              id: subG._id.toHexString(),
+              name: subG.name,
+              required: subG.required,
+              minSelection: subG.minSelection,
+              maxSelection: subG.maxSelection,
+              displayType: subG.displayType,
+              options: subG.options.map(subOpt => ({
+                id: subOpt._id.toHexString(),
+                name: subOpt.name,
+                image: subOpt.image,
+                price: subOpt.price,
+                isDefault: subOpt.isDefault
+              }))
+            })) : []
           }))
         }))
       }))
