@@ -28,8 +28,13 @@ app.use(
 );
 
 // Register Modules
-const { initMenuModule } = require('./modules/menu');
+const { initMenuModule }  = require('./modules/menu');
+const { initOrderModule } = require('./modules/order');
+const { initPromoModule } = require('./modules/promo');
+
 initMenuModule(app);
+initOrderModule(app);
+initPromoModule(app);
 
 // Health Check Route
 app.get('/api/health', (req, res) => {
