@@ -7,7 +7,9 @@ router.get('/next-number',    orderController.getNextOrderNumber);
 router.get('/',               orderController.getAllOrders);
 router.get('/:id',            orderController.getOrderById);
 router.patch('/:id/status',   orderController.updateOrderStatus);
+router.patch('/:id/due-time', orderController.updateOrderDueTime);
 router.patch('/:id/payment',  orderController.markOrderPaid);
+router.patch('/:id',          orderController.updateOrderItems);
 router.delete('/:id',         orderController.cancelOrder);
 
 module.exports = router;

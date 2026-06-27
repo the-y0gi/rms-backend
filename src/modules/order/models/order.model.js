@@ -8,6 +8,7 @@ const selectedModifierSchema = new mongoose.Schema(
     optionId: { type: String, required: true },
     optionName: { type: String, required: true },
     price: { type: Number, default: 0 },
+    isRoot: { type: Boolean, default: true },
   },
   { _id: false },
 );
@@ -113,6 +114,7 @@ const orderSchema = new mongoose.Schema(
       default: "now",
     },
     scheduledAt: { type: Date, default: null },
+    dueAt: { type: Date, default: null },
 
     // Optional customer
     customer: { type: customerSchema, default: null },
@@ -146,8 +148,20 @@ const TYPE_PREFIX = {
   "dine-in": "DN",
 };
 
-orderSchema.statics.generateOrderNumber = async function (orderType) {
-  const today = new Date().toISOString().slice(0, 10).replace(/-/g, ""); // "20260626"
+orderSchema.statics.generateOrderNumber = async function (
+  orderType,
+  scheduledAt,
+) {
+  let targetDate;
+  if (scheduledAt) {
+    targetDate = new Date(scheduledAt);
+  } else {
+    targetDate = new Date();
+  }
+  const localDate = new Date(
+    targetDate.getTime() - targetDate.getTimezoneOffset() * 60000,
+  );
+  const today = localDate.toISOString().slice(0, 10).replace(/-/g, ""); // "20260626"
   const prefix = TYPE_PREFIX[orderType] || "TO";
 
   const counter = await OrderCounter.findByIdAndUpdate(
@@ -161,7 +175,9 @@ orderSchema.statics.generateOrderNumber = async function (orderType) {
 };
 
 orderSchema.statics.previewNextOrderNumber = async function (orderType) {
-  const today = new Date().toISOString().slice(0, 10).replace(/-/g, ""); // "20260626"
+  const d = new Date();
+  const localDate = new Date(d.getTime() - d.getTimezoneOffset() * 60000);
+  const today = localDate.toISOString().slice(0, 10).replace(/-/g, ""); // "20260626"
   const prefix = TYPE_PREFIX[orderType] || "TO";
 
   const counter = await OrderCounter.findById(today);

@@ -4,16 +4,32 @@ const logger = require('../../../shared/utils/logger');
 // ── Create Order ──────────────────────────────────────────────
 exports.createOrder = async (orderData) => {
   try {
-    const orderNumber = await Order.generateOrderNumber(orderData.orderType);
+    const orderNumber = await Order.generateOrderNumber(
+      orderData.orderType,
+      orderData.orderTiming === 'later' ? orderData.scheduledAt : null
+    );
 
     // If pay-later → paymentStatus = unpaid, no payments array needed
     const paymentStatus =
       orderData.paymentTiming === 'pay-later' ? 'unpaid' : 'paid';
 
+    let dueAt = orderData.dueAt;
+    if (!dueAt) {
+      if (orderData.orderTiming === 'later' && orderData.scheduledAt) {
+        dueAt = new Date(orderData.scheduledAt);
+      } else {
+        dueAt = new Date(Date.now() + 15 * 60 * 1000); // 15 mins default
+      }
+    }
+
     const order = new Order({
       ...orderData,
+      customer: orderData.customer && orderData.customer.name && orderData.customer.name.trim()
+        ? orderData.customer
+        : { name: 'No Name', phone: '', email: '' },
       orderNumber,
       paymentStatus,
+      dueAt,
       statusHistory: [{ status: 'pending', changedAt: new Date() }],
     });
 
@@ -105,16 +121,22 @@ exports.markOrderPaid = async (id, payments) => {
   try {
     const order = await Order.findById(id);
     if (!order) throw new Error('Order not found.');
-    if (order.paymentStatus === 'paid') throw new Error('Order is already paid.');
 
-    order.paymentStatus = 'paid';
-    order.paymentTiming = 'pay-now'; // retroactively mark
     if (payments && payments.length > 0) {
-      order.payments = payments;
+      order.payments = [...(order.payments || []), ...payments];
     }
+    
+    const paymentsTotal = order.payments ? order.payments.reduce((sum, p) => sum + p.amount, 0) : 0;
+    if (paymentsTotal >= order.total - 0.01) {
+      order.paymentStatus = 'paid';
+      order.paymentTiming = 'pay-now';
+    } else {
+      order.paymentStatus = 'unpaid'; // still partially unpaid
+    }
+    
     await order.save();
 
-    logger.info(`Order ${order.orderNumber} marked as PAID`);
+    logger.info(`Order ${order.orderNumber} payments updated. Total paid: ${paymentsTotal}`);
     return order;
   } catch (error) {
     logger.error(`Order Service Error: markOrderPaid - ${error.message}`);
@@ -150,6 +172,57 @@ exports.getNextOrderNumber = async (orderType) => {
     return nextNumber;
   } catch (error) {
     logger.error(`Order Service Error: getNextOrderNumber - ${error.message}`);
+    throw error;
+  }
+};
+
+// ── Update Order Due Time ─────────────────────────────────────
+exports.updateOrderDueTime = async (id, dueAt) => {
+  try {
+    const order = await Order.findById(id);
+    if (!order) throw new Error('Order not found.');
+
+    order.dueAt = new Date(dueAt);
+    await order.save();
+
+    logger.info(`Order ${order.orderNumber} due time updated to ${dueAt}`);
+    return order;
+  } catch (error) {
+    logger.error(`Order Service Error: updateOrderDueTime - ${error.message}`);
+    throw error;
+  }
+};
+
+// ── Update Order Items ─────────────────────────────────────────
+exports.updateOrderItems = async (id, updateData) => {
+  try {
+    const order = await Order.findById(id);
+    if (!order) throw new Error('Order not found.');
+
+    if (updateData.items) {
+      order.items = updateData.items;
+    }
+    if (updateData.subtotal !== undefined) order.subtotal = updateData.subtotal;
+    if (updateData.tax !== undefined) order.tax = updateData.tax;
+    if (updateData.discount !== undefined) order.discount = updateData.discount;
+    if (updateData.total !== undefined) {
+      order.total = updateData.total;
+      
+      // Recalculate payment status based on total and paid amounts
+      const paymentsTotal = order.payments ? order.payments.reduce((sum, p) => sum + p.amount, 0) : 0;
+      if (paymentsTotal >= updateData.total - 0.01) {
+        order.paymentStatus = 'paid';
+      } else {
+        order.paymentStatus = 'unpaid';
+      }
+    }
+    if (updateData.notes !== undefined) order.notes = updateData.notes;
+
+    await order.save();
+    logger.info(`Order ${order.orderNumber} items updated. Payment status: ${order.paymentStatus}`);
+    return order;
+  } catch (error) {
+    logger.error(`Order Service Error: updateOrderItems - ${error.message}`);
     throw error;
   }
 };

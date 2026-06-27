@@ -83,3 +83,25 @@ exports.getNextOrderNumber = async (req, res) => {
     handleError(res, error, 500);
   }
 };
+
+// PATCH /api/orders/:id/due-time
+exports.updateOrderDueTime = async (req, res) => {
+  try {
+    const { dueAt } = req.body;
+    if (!dueAt) return res.status(400).json({ success: false, message: 'dueAt is required.' });
+    const order = await orderService.updateOrderDueTime(req.params.id, dueAt);
+    res.status(200).json({ success: true, data: order });
+  } catch (error) {
+    handleError(res, error, 400);
+  }
+};
+
+// PATCH /api/orders/:id  — update order items
+exports.updateOrderItems = async (req, res) => {
+  try {
+    const order = await orderService.updateOrderItems(req.params.id, req.body);
+    res.status(200).json({ success: true, data: order });
+  } catch (error) {
+    handleError(res, error, 400);
+  }
+};
