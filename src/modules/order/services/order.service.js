@@ -51,8 +51,20 @@ exports.getAllOrders = async (filters = {}) => {
     if (filters.orderType)   query.orderType = filters.orderType;
     if (filters.paymentStatus) query.paymentStatus = filters.paymentStatus;
 
-    // Date filter: default today
-    if (filters.date) {
+    // Date filter: single date or range
+    if (filters.startDate || filters.endDate) {
+      query.createdAt = {};
+      if (filters.startDate) {
+        const start = new Date(filters.startDate);
+        start.setHours(0, 0, 0, 0);
+        query.createdAt.$gte = start;
+      }
+      if (filters.endDate) {
+        const end = new Date(filters.endDate);
+        end.setHours(23, 59, 59, 999);
+        query.createdAt.$lte = end;
+      }
+    } else if (filters.date) {
       const start = new Date(filters.date);
       start.setHours(0, 0, 0, 0);
       const end = new Date(filters.date);
@@ -61,8 +73,11 @@ exports.getAllOrders = async (filters = {}) => {
     }
 
     const orders = await Order.find(query)
-      .sort({ scheduledAt: 1, createdAt: 1 }) // Order Later orders come first when their time arrives
+      .select('orderNumber customer subtotal total orderType orderSource paymentStatus status createdAt items')
+      .sort({ createdAt: -1 })
       .lean();
+
+
 
     return orders;
   } catch (error) {

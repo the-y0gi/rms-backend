@@ -19,8 +19,8 @@ exports.createOrder = async (req, res) => {
 // GET /api/orders
 exports.getAllOrders = async (req, res) => {
   try {
-    const { status, orderType, paymentStatus, date } = req.query;
-    const orders = await orderService.getAllOrders({ status, orderType, paymentStatus, date });
+    const { status, orderType, paymentStatus, date, startDate, endDate } = req.query;
+    const orders = await orderService.getAllOrders({ status, orderType, paymentStatus, date, startDate, endDate });
     res.status(200).json({ success: true, data: orders });
   } catch (error) {
     handleError(res, error, 500);

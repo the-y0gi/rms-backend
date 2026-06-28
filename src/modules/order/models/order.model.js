@@ -186,4 +186,6 @@ orderSchema.statics.previewNextOrderNumber = async function (orderType) {
   return `#${prefix}-${today}-${seq}`;
 };
 
+orderSchema.index({ createdAt: -1 });
+
 module.exports = mongoose.model("Order", orderSchema);
