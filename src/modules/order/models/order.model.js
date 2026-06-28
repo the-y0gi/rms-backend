@@ -170,8 +170,8 @@ orderSchema.statics.generateOrderNumber = async function (
     { upsert: true, new: true },
   );
 
-  const seq = String(counter.count).padStart(3, "0");
-  return `#${prefix}-${today}-${seq}`;
+  const seq = 100 + counter.count;
+  return `${prefix}-${seq}`;
 };
 
 orderSchema.statics.previewNextOrderNumber = async function (orderType) {
@@ -182,8 +182,8 @@ orderSchema.statics.previewNextOrderNumber = async function (orderType) {
 
   const counter = await OrderCounter.findById(today);
   const nextCount = (counter ? counter.count : 0) + 1;
-  const seq = String(nextCount).padStart(3, "0");
-  return `#${prefix}-${today}-${seq}`;
+  const seq = 100 + nextCount;
+  return `${prefix}-${seq}`;
 };
 
 orderSchema.index({ createdAt: -1 });
