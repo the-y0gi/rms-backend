@@ -402,7 +402,36 @@ exports.getSalesSummary = async (filters = {}) => {
         online: onlineTotal,
         pos: posTotal
       },
-      expense: [],
+      expense: (await (async () => {
+        try {
+          const Expense = require('../../expense/models/expense.model');
+          const expQuery = {};
+          if (filters.date) {
+            const dateStr = String(filters.date).split('T')[0];
+            const parts = dateStr.split('-');
+            if (parts.length === 3) {
+              const start = new Date(Date.UTC(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]), 0, 0, 0, 0));
+              const end = new Date(Date.UTC(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]), 23, 59, 59, 999));
+              expQuery.expenseDate = { $gte: start, $lte: end };
+            }
+          }
+          const expenses = await Expense.find(expQuery).lean();
+          const empMap = {};
+          expenses.forEach(e => {
+            const emp = e.expenseType === 'store' ? 'Store Expense' : (e.employeeName || 'Manager');
+            if (!empMap[emp]) {
+              empMap[emp] = { employee: emp, pst: 0, gst: 0, hst: 0, total: 0 };
+            }
+            empMap[emp].pst += e.pst || 0;
+            empMap[emp].gst += e.gst || 0;
+            empMap[emp].hst += e.hst || 0;
+            empMap[emp].total += e.amount || 0;
+          });
+          return Object.values(empMap);
+        } catch (err) {
+          return [];
+        }
+      })()),
       shortageOverage: { cash: 0, card: 0, accountPay: 0 },
       moneyToBeCollected: { cash: cashTotal, card: cardTotal, accountPay: 0 },
       driverReport: []

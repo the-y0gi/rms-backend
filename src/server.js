@@ -31,10 +31,12 @@ app.use(
 const { initMenuModule }  = require('./modules/menu');
 const { initOrderModule } = require('./modules/order');
 const { initPromoModule } = require('./modules/promo');
+const { initExpenseModule } = require('./modules/expense');
 
 initMenuModule(app);
 initOrderModule(app);
 initPromoModule(app);
+initExpenseModule(app);
 
 // Health Check Route
 app.get('/api/health', (req, res) => {
