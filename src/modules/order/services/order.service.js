@@ -1,4 +1,6 @@
 const Order = require('../models/order.model');
+const Product = require('../../menu/models/product.model');
+const Category = require('../../menu/models/category.model');
 const logger = require('../../../shared/utils/logger');
 
 // ── Create Order ──────────────────────────────────────────────
@@ -241,3 +243,173 @@ exports.updateOrderItems = async (id, updateData) => {
     throw error;
   }
 };
+
+// ── Get Sales Summary Aggregation ─────────────────────────────
+exports.getSalesSummary = async (filters = {}) => {
+  try {
+    const query = {};
+    if (filters.startDate || filters.endDate) {
+      query.createdAt = {};
+      if (filters.startDate) {
+        const start = new Date(filters.startDate);
+        start.setHours(0, 0, 0, 0);
+        query.createdAt.$gte = start;
+      }
+      if (filters.endDate) {
+        const end = new Date(filters.endDate);
+        end.setHours(23, 59, 59, 999);
+        query.createdAt.$lte = end;
+      }
+    } else if (filters.date) {
+      const start = new Date(filters.date);
+      start.setHours(0, 0, 0, 0);
+      const end = new Date(filters.date);
+      end.setHours(23, 59, 59, 999);
+      query.createdAt = { $gte: start, $lte: end };
+    }
+
+    const orders = await Order.find(query).lean();
+
+    // Fetch products to build category lookup map
+    const productCategoryMap = {};
+    try {
+      const products = await Product.find().populate('categoryId').lean();
+      products.forEach(p => {
+        const prodId = p._id ? p._id.toString() : '';
+        const catName = p.categoryId && typeof p.categoryId === 'object' ? p.categoryId.name : '';
+        if (prodId && catName) {
+          productCategoryMap[prodId] = catName;
+        }
+      });
+    } catch (err) {
+      logger.warn(`Could not build product category lookup: ${err.message}`);
+    }
+
+    // 1. Completed & Cancelled Orders
+    let completedCount = 0;
+    let completedTotal = 0;
+    let cancelledCount = 0;
+    let cancelledTotal = 0;
+
+    // Financial sums for completed/valid orders
+    let grossSubtotal = 0;
+    let grossTax = 0;
+    let grossDiscount = 0;
+    let grandTotal = 0;
+
+    // Categories map
+    const categorySales = {};
+
+    // Order Types
+    let takeoutTotal = 0;
+    let dineInTotal = 0;
+    let driveThroughTotal = 0;
+
+    // Channels
+    let onlineTotal = 0;
+    let posTotal = 0;
+
+    // Payment methods
+    let cashTotal = 0;
+    let cardTotal = 0;
+
+    orders.forEach(order => {
+      if (order.status === 'cancelled') {
+        cancelledCount += 1;
+        cancelledTotal += order.total || 0;
+      } else {
+        completedCount += 1;
+        completedTotal += order.total || 0;
+
+        grossSubtotal += order.subtotal || 0;
+        grossTax += order.tax || 0;
+        grossDiscount += order.discount || 0;
+        grandTotal += order.total || 0;
+
+        // Order types
+        if (order.orderType === 'takeout') takeoutTotal += order.total;
+        else if (order.orderType === 'dine-in') dineInTotal += order.total;
+        else if (order.orderType === 'drive-through') driveThroughTotal += order.total;
+
+        // Channel
+        if (order.orderSource === 'online') onlineTotal += order.total;
+        else posTotal += order.total;
+
+        // Payments
+        if (order.paymentStatus === 'paid') {
+          if (order.paymentType === 'split' && order.payments && order.payments.length > 0) {
+            order.payments.forEach(p => {
+              if (p.method === 'cash') cashTotal += p.amount;
+              else cardTotal += p.amount;
+            });
+          } else {
+            cashTotal += order.total;
+          }
+        }
+
+        // Category breakdown from items
+        if (order.items && Array.isArray(order.items)) {
+          order.items.forEach(item => {
+            const itemProdId = item.menuItemId ? item.menuItemId.toString() : '';
+            const catName = item.categoryName || item.category || productCategoryMap[itemProdId] || 'Open Item';
+            categorySales[catName] = (categorySales[catName] || 0) + (item.totalPrice || (item.basePrice * item.quantity));
+          });
+        }
+      }
+    });
+
+    return {
+      dateRange: { startDate: filters.startDate, endDate: filters.endDate || filters.date },
+      completedOrders: { count: completedCount, totalAmount: completedTotal },
+      cancelledOrders: { count: cancelledCount, totalAmount: cancelledTotal },
+      refundOrders: { count: 0, totalAmount: 0 },
+      financials: {
+        allCategoryTotal: grossSubtotal,
+        subTotal: grossSubtotal,
+        deliveryCharges: 0,
+        debitCardCharges: 0,
+        discount: grossDiscount,
+        tax: grossTax,
+        grandTotal: grandTotal,
+        tips: 0,
+        finalAmount: grandTotal
+      },
+      categorySales: Object.entries(categorySales).map(([name, total]) => ({ name, total })),
+      discountSummary: { percentageDiscount: grossDiscount, total: grossDiscount },
+      taxSummary: { pst: 0, gst: grossTax, hst: 0, total: grossTax },
+      salesReceived: {
+        accountPay: 0,
+        cash: cashTotal,
+        creditCardSales: 0,
+        debitCardSales: cardTotal,
+        grandTotal: grandTotal,
+        tips: 0,
+        finalAmount: grandTotal
+      },
+      cardTypeReceived: {
+        interac: { total: cardTotal, tips: 0, final: cardTotal },
+        mastercard: { total: 0, tips: 0, final: 0 },
+        visa: { total: 0, tips: 0, final: 0 },
+        total: { total: cardTotal, tips: 0, final: cardTotal }
+      },
+      orderTypeSummary: {
+        takeout: takeoutTotal,
+        dineIn: dineInTotal,
+        driveThrough: driveThroughTotal,
+        total: grandTotal
+      },
+      channelSummary: {
+        online: onlineTotal,
+        pos: posTotal
+      },
+      expense: [],
+      shortageOverage: { cash: 0, card: 0, accountPay: 0 },
+      moneyToBeCollected: { cash: cashTotal, card: cardTotal, accountPay: 0 },
+      driverReport: []
+    };
+  } catch (error) {
+    logger.error(`Order Service Error: getSalesSummary - ${error.message}`);
+    throw error;
+  }
+};
+

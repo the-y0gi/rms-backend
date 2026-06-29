@@ -27,6 +27,17 @@ exports.getAllOrders = async (req, res) => {
   }
 };
 
+// GET /api/orders/sales-summary
+exports.getSalesSummary = async (req, res) => {
+  try {
+    const { date, startDate, endDate } = req.query;
+    const summary = await orderService.getSalesSummary({ date, startDate, endDate });
+    res.status(200).json({ success: true, data: summary });
+  } catch (error) {
+    handleError(res, error, 500);
+  }
+};
+
 // GET /api/orders/:id
 exports.getOrderById = async (req, res) => {
   try {
