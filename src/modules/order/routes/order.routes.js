@@ -7,6 +7,7 @@ router.get('/next-number',    orderController.getNextOrderNumber);
 router.get('/sales-summary',   orderController.getSalesSummary);
 router.get('/',               orderController.getAllOrders);
 router.get('/:id',            orderController.getOrderById);
+router.get('/:id/pdf',        orderController.downloadReceiptPdf);
 router.patch('/:id/status',   orderController.updateOrderStatus);
 router.patch('/:id/due-time', orderController.updateOrderDueTime);
 router.patch('/:id/payment',  orderController.markOrderPaid);

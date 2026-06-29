@@ -1,4 +1,5 @@
 const orderService = require('../services/order.service');
+const receiptPdfService = require('../services/receiptPdf.service');
 const logger = require('../../../shared/utils/logger');
 
 const handleError = (res, error, status = 400) => {
@@ -45,6 +46,21 @@ exports.getOrderById = async (req, res) => {
     res.status(200).json({ success: true, data: order });
   } catch (error) {
     handleError(res, error, 404);
+  }
+};
+
+// GET /api/orders/:id/pdf
+exports.downloadReceiptPdf = async (req, res) => {
+  try {
+    const order = await orderService.getOrderById(req.params.id);
+    if (!order) {
+      return res.status(404).json({ success: false, message: 'Order not found' });
+    }
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename=invoice-${order.orderNumber}.pdf`);
+    receiptPdfService.generateReceiptPdf(order, res);
+  } catch (error) {
+    handleError(res, error, 500);
   }
 };
 
