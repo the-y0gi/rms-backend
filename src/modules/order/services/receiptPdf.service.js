@@ -101,8 +101,8 @@ exports.generateReceiptPdf = (order, res) => {
 
     // 2. Order Header
     const orderNumStr = order.orderNumber
-      ? order.orderNumber.replace("#", "")
-      : "TO-104";
+      ? order.orderNumber.replace(/^[#A-Za-z\-]+/, "")
+      : "104";
     doc
       .font("Helvetica-Bold")
       .fontSize(14)

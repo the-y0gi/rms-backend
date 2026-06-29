@@ -142,12 +142,6 @@ const orderSchema = new mongoose.Schema(
 );
 
 // ── Static: Generate order number ─────────────────────────────
-const TYPE_PREFIX = {
-  takeout: "TO",
-  "drive-through": "DT",
-  "dine-in": "DN",
-};
-
 orderSchema.statics.generateOrderNumber = async function (
   orderType,
   scheduledAt,
@@ -162,7 +156,6 @@ orderSchema.statics.generateOrderNumber = async function (
     targetDate.getTime() - targetDate.getTimezoneOffset() * 60000,
   );
   const today = localDate.toISOString().slice(0, 10).replace(/-/g, ""); // "20260626"
-  const prefix = TYPE_PREFIX[orderType] || "TO";
 
   const counter = await OrderCounter.findByIdAndUpdate(
     today,
@@ -171,19 +164,18 @@ orderSchema.statics.generateOrderNumber = async function (
   );
 
   const seq = 100 + counter.count;
-  return `${prefix}-${seq}`;
+  return String(seq);
 };
 
 orderSchema.statics.previewNextOrderNumber = async function (orderType) {
   const d = new Date();
   const localDate = new Date(d.getTime() - d.getTimezoneOffset() * 60000);
   const today = localDate.toISOString().slice(0, 10).replace(/-/g, ""); // "20260626"
-  const prefix = TYPE_PREFIX[orderType] || "TO";
 
   const counter = await OrderCounter.findById(today);
   const nextCount = (counter ? counter.count : 0) + 1;
   const seq = 100 + nextCount;
-  return `${prefix}-${seq}`;
+  return String(seq);
 };
 
 orderSchema.index({ createdAt: -1 });
