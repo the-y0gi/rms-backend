@@ -132,3 +132,14 @@ exports.updateOrderItems = async (req, res) => {
     handleError(res, error, 400);
   }
 };
+
+// POST /api/orders/sales-summary/deposit
+exports.saveDeposit = async (req, res) => {
+  try {
+    const { date, cashAmount, cardAmount, accountPayAmount } = req.body;
+    const deposit = await orderService.saveDeposit({ date, cashAmount, cardAmount, accountPayAmount });
+    res.status(200).json({ success: true, data: deposit });
+  } catch (error) {
+    handleError(res, error, 400);
+  }
+};

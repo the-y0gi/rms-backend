@@ -5,6 +5,7 @@ const orderController = require('../controllers/order.controller');
 router.post('/',              orderController.createOrder);
 router.get('/next-number',    orderController.getNextOrderNumber);
 router.get('/sales-summary',   orderController.getSalesSummary);
+router.post('/sales-summary/deposit', orderController.saveDeposit);
 router.get('/',               orderController.getAllOrders);
 router.get('/:id',            orderController.getOrderById);
 router.get('/:id/pdf',        orderController.downloadReceiptPdf);

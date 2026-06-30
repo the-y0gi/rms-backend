@@ -21,6 +21,11 @@ const expenseSchema = new mongoose.Schema(
       type: Date,
       default: Date.now,
     },
+    paymentMode: {
+      type: String,
+      enum: ['cash', 'card'],
+      default: 'cash',
+    },
     amount: {
       type: Number,
       required: [true, 'Expense amount is required'],

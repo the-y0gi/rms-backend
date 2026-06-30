@@ -2,6 +2,7 @@ const Order = require("../models/order.model");
 const Product = require("../../menu/models/product.model");
 const Category = require("../../menu/models/category.model");
 const Expense = require("../../expense/models/expense.model");
+const Deposit = require("../models/deposit.model");
 const logger = require("../../../shared/utils/logger");
 
 // ── Create Order ──────────────────────────────────────────────
@@ -353,16 +354,13 @@ exports.getSalesSummary = async (filters = {}) => {
 
         // Payments
         if (order.paymentStatus === "paid") {
-          if (
-            order.paymentType === "split" &&
-            order.payments &&
-            order.payments.length > 0
-          ) {
+          if (order.payments && order.payments.length > 0) {
             order.payments.forEach((p) => {
               if (p.method === "cash") cashTotal += p.amount;
               else cardTotal += p.amount;
             });
           } else {
+            // fallback if payments array is missing/empty (e.g. old orders)
             cashTotal += order.total;
           }
         }
@@ -385,6 +383,76 @@ exports.getSalesSummary = async (filters = {}) => {
         }
       }
     });
+
+    // Query daily deposit record
+    let targetDateStr = "";
+    if (filters.date) {
+      targetDateStr = String(filters.date).split("T")[0];
+    } else if (filters.startDate) {
+      targetDateStr = String(filters.startDate).split("T")[0];
+    } else {
+      targetDateStr = new Date().toISOString().split("T")[0];
+    }
+
+    const deposit = await Deposit.findOne({ date: targetDateStr }).lean();
+
+    // Query expenses for the same day to calculate totalCashExpense
+    let totalCashExpense = 0;
+    const rawExpenses = [];
+    try {
+      const expQuery = {};
+      if (targetDateStr) {
+        const parts = targetDateStr.split("-");
+        if (parts.length === 3) {
+          const start = new Date(
+            Date.UTC(
+              Number(parts[0]),
+              Number(parts[1]) - 1,
+              Number(parts[2]),
+              0,
+              0,
+              0,
+              0,
+            ),
+          );
+          const end = new Date(
+            Date.UTC(
+              Number(parts[0]),
+              Number(parts[1]) - 1,
+              Number(parts[2]),
+              23,
+              59,
+              59,
+              999,
+            ),
+          );
+          expQuery.expenseDate = { $gte: start, $lte: end };
+        }
+      }
+      const expensesList = await Expense.find(expQuery).lean();
+      expensesList.forEach((e) => {
+        rawExpenses.push(e);
+        if (e.paymentMode !== "card") {
+          totalCashExpense += e.amount || 0;
+        }
+      });
+    } catch (err) {
+      logger.warn(`Could not query daily expenses: ${err.message}`);
+    }
+
+    // Deduct cash expenses from expected totals
+    const adjustedExpectedCash = Math.max(0, cashTotal - totalCashExpense);
+    const adjustedPosTotal = Math.max(0, posTotal - totalCashExpense);
+
+    let shortageOverageCash = 0;
+    let shortageOverageCard = 0;
+    let shortageOverageAccountPay = 0;
+
+    if (deposit) {
+      shortageOverageCash = deposit.cashAmount - adjustedExpectedCash;
+      shortageOverageCard = deposit.cardAmount - cardTotal;
+      shortageOverageAccountPay = deposit.accountPayAmount - 0;
+    }
 
     return {
       dateRange: {
@@ -437,66 +505,53 @@ exports.getSalesSummary = async (filters = {}) => {
       },
       channelSummary: {
         online: onlineTotal,
-        pos: posTotal,
+        pos: adjustedPosTotal,
       },
-      expense: await (async () => {
-        try {
-          const expQuery = {};
-          if (filters.date) {
-            const dateStr = String(filters.date).split("T")[0];
-            const parts = dateStr.split("-");
-            if (parts.length === 3) {
-              const start = new Date(
-                Date.UTC(
-                  Number(parts[0]),
-                  Number(parts[1]) - 1,
-                  Number(parts[2]),
-                  0,
-                  0,
-                  0,
-                  0,
-                ),
-              );
-              const end = new Date(
-                Date.UTC(
-                  Number(parts[0]),
-                  Number(parts[1]) - 1,
-                  Number(parts[2]),
-                  23,
-                  59,
-                  59,
-                  999,
-                ),
-              );
-              expQuery.expenseDate = { $gte: start, $lte: end };
-            }
-          }
-          const expenses = await Expense.find(expQuery).lean();
-          const empMap = {};
-          expenses.forEach((e) => {
-            const emp =
-              e.expenseType === "store"
-                ? "Store Expense"
-                : e.employeeName || "Manager";
-            if (!empMap[emp]) {
-              empMap[emp] = { employee: emp, pst: 0, gst: 0, hst: 0, total: 0 };
-            }
-            empMap[emp].pst += e.pst || 0;
-            empMap[emp].gst += e.gst || 0;
-            empMap[emp].hst += e.hst || 0;
-            empMap[emp].total += e.amount || 0;
-          });
-          return Object.values(empMap);
-        } catch (err) {
-          return [];
-        }
-      })(),
-      shortageOverage: { cash: 0, card: 0, accountPay: 0 },
-      moneyToBeCollected: { cash: cashTotal, card: cardTotal, accountPay: 0 },
+      expense: rawExpenses.map((e) => ({
+        employee: e.expenseType === "store" ? "Store Expense" : e.employeeName || "Manager",
+        pst: e.pst || 0,
+        gst: e.gst || 0,
+        hst: e.hst || 0,
+        total: e.amount || 0,
+        paymentMode: e.paymentMode || "cash",
+      })),
+      shortageOverage: {
+        cash: shortageOverageCash,
+        card: shortageOverageCard,
+        accountPay: shortageOverageAccountPay,
+      },
+      moneyToBeCollected: { cash: adjustedExpectedCash, card: cardTotal, accountPay: 0 },
       driverReport: [],
+      deposit: deposit ? {
+        cashAmount: deposit.cashAmount,
+        cardAmount: deposit.cardAmount,
+        accountPayAmount: deposit.accountPayAmount,
+      } : null,
     };
   } catch (error) {
     logger.error(`Order Service Error: getSalesSummary - ${error.message}`);
+    throw error;
+  }
+};
+
+// ── Save Deposit ───────────────────────────────────────────────
+exports.saveDeposit = async (depositData) => {
+  try {
+    const { date, cashAmount, cardAmount, accountPayAmount } = depositData;
+    if (!date) throw new Error("Deposit date is required.");
+
+    const deposit = await Deposit.findOneAndUpdate(
+      { date },
+      {
+        cashAmount: cashAmount !== undefined ? cashAmount : 0,
+        cardAmount: cardAmount !== undefined ? cardAmount : 0,
+        accountPayAmount: accountPayAmount !== undefined ? accountPayAmount : 0,
+      },
+      { new: true, upsert: true }
+    );
+    return deposit;
+  } catch (error) {
+    logger.error(`Order Service Error: saveDeposit - ${error.message}`);
     throw error;
   }
 };
