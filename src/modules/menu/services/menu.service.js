@@ -31,7 +31,7 @@ exports.createCategory = async (categoryData) => {
 
 exports.updateCategory = async (id, categoryData) => {
   try {
-    const category = await Category.findByIdAndUpdate(id, categoryData, { new: true, runValidators: true });
+    const category = await Category.findByIdAndUpdate(id, categoryData, { returnDocument: 'after', runValidators: true });
     if (!category) {
       throw new Error('Category not found.');
     }
@@ -77,7 +77,7 @@ exports.createModifierGroup = async (groupData) => {
 
 exports.updateModifierGroup = async (id, groupData) => {
   try {
-    const group = await ModifierGroup.findByIdAndUpdate(id, groupData, { new: true, runValidators: true });
+    const group = await ModifierGroup.findByIdAndUpdate(id, groupData, { returnDocument: 'after', runValidators: true });
     if (!group) {
       throw new Error('Modifier group not found.');
     }
@@ -139,7 +139,7 @@ exports.createProduct = async (productData) => {
 
 exports.updateProduct = async (id, productData) => {
   try {
-    const product = await Product.findByIdAndUpdate(id, productData, { new: true, runValidators: true })
+    const product = await Product.findByIdAndUpdate(id, productData, { returnDocument: 'after', runValidators: true })
       .populate('categoryId')
       .populate({
         path: 'modifierGroups',

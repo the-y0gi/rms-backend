@@ -82,7 +82,7 @@ exports.getAllPromos = async () => {
 
 exports.updatePromo = async (id, data) => {
   try {
-    const promo = await Promo.findByIdAndUpdate(id, data, { new: true, runValidators: true });
+    const promo = await Promo.findByIdAndUpdate(id, data, { returnDocument: 'after', runValidators: true });
     if (!promo) throw new Error('Promo not found.');
     return promo;
   } catch (error) {

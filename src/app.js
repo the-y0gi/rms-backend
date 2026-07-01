@@ -14,6 +14,20 @@ const app = express();
 // Connect Database
 connectDB();
 
+//Ensure database is connected before handling requests
+app.use(async (req, res, next) => {
+  try {
+    await connectDB();
+    next();
+  } catch (error) {
+    logger.error(`Database connection middleware error: ${error.message}`);
+    res.status(500).json({
+      status: "ERROR",
+      message: "Database connection failed. Please try again later.",
+    });
+  }
+});
+
 app.use(helmet());
 
 // CORS Configuration

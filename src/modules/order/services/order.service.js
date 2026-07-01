@@ -547,7 +547,7 @@ exports.saveDeposit = async (depositData) => {
         cardAmount: cardAmount !== undefined ? cardAmount : 0,
         accountPayAmount: accountPayAmount !== undefined ? accountPayAmount : 0,
       },
-      { new: true, upsert: true }
+      { returnDocument: "after", upsert: true }
     );
     return deposit;
   } catch (error) {

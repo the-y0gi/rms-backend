@@ -61,7 +61,7 @@ const OrderCounter = mongoose.model("OrderCounter", OrderCounterSchema);
 // ── Main Order Schema ─────────────────────────────────────────
 const orderSchema = new mongoose.Schema(
   {
-    orderNumber: { type: String, unique: true, index: true },
+    orderNumber: { type: String, index: true },
     orderType: {
       type: String,
       enum: ["takeout", "drive-through", "dine-in"],
@@ -152,30 +152,65 @@ orderSchema.statics.generateOrderNumber = async function (
   } else {
     targetDate = new Date();
   }
-  const localDate = new Date(
-    targetDate.getTime() - targetDate.getTimezoneOffset() * 60000,
-  );
-  const today = localDate.toISOString().slice(0, 10).replace(/-/g, ""); // "20260626"
 
-  const counter = await OrderCounter.findByIdAndUpdate(
-    today,
-    { $inc: { count: 1 } },
-    { upsert: true, new: true },
-  );
+  const timezoneOffsetMinutes = targetDate.getTimezoneOffset();
+  const localTime = new Date(targetDate.getTime() - timezoneOffsetMinutes * 60 * 1000);
+  const dateString = localTime.toISOString().slice(0, 10); // "YYYY-MM-DD"
 
-  const seq = 100 + counter.count;
-  return String(seq);
+  const startOfDay = new Date(dateString + 'T00:00:00.000Z');
+  startOfDay.setMinutes(startOfDay.getMinutes() + timezoneOffsetMinutes);
+
+  const endOfDay = new Date(dateString + 'T23:59:59.999Z');
+  endOfDay.setMinutes(endOfDay.getMinutes() + timezoneOffsetMinutes);
+
+  const todayOrders = await this.find({
+    createdAt: { $gte: startOfDay, $lte: endOfDay },
+    orderNumber: { $regex: /^\d+$/ }
+  })
+  .select("orderNumber")
+  .lean()
+  .exec();
+
+  let maxSeq = 100;
+  for (const ord of todayOrders) {
+    const num = parseInt(ord.orderNumber, 10);
+    if (!isNaN(num) && num > maxSeq) {
+      maxSeq = num;
+    }
+  }
+
+  return String(maxSeq + 1);
 };
 
 orderSchema.statics.previewNextOrderNumber = async function (orderType) {
   const d = new Date();
-  const localDate = new Date(d.getTime() - d.getTimezoneOffset() * 60000);
-  const today = localDate.toISOString().slice(0, 10).replace(/-/g, ""); // "20260626"
+  const timezoneOffsetMinutes = d.getTimezoneOffset();
+  const localTime = new Date(d.getTime() - timezoneOffsetMinutes * 60 * 1000);
+  const dateString = localTime.toISOString().slice(0, 10); // "YYYY-MM-DD"
 
-  const counter = await OrderCounter.findById(today);
-  const nextCount = (counter ? counter.count : 0) + 1;
-  const seq = 100 + nextCount;
-  return String(seq);
+  const startOfDay = new Date(dateString + 'T00:00:00.000Z');
+  startOfDay.setMinutes(startOfDay.getMinutes() + timezoneOffsetMinutes);
+
+  const endOfDay = new Date(dateString + 'T23:59:59.999Z');
+  endOfDay.setMinutes(endOfDay.getMinutes() + timezoneOffsetMinutes);
+
+  const todayOrders = await this.find({
+    createdAt: { $gte: startOfDay, $lte: endOfDay },
+    orderNumber: { $regex: /^\d+$/ }
+  })
+  .select("orderNumber")
+  .lean()
+  .exec();
+
+  let maxSeq = 100;
+  for (const ord of todayOrders) {
+    const num = parseInt(ord.orderNumber, 10);
+    if (!isNaN(num) && num > maxSeq) {
+      maxSeq = num;
+    }
+  }
+
+  return String(maxSeq + 1);
 };
 
 orderSchema.index({ createdAt: -1 });
