@@ -47,6 +47,8 @@ const customerSchema = new mongoose.Schema(
     name: { type: String, default: "" },
     phone: { type: String, default: "" },
     email: { type: String, default: "" },
+    address: { type: String, default: "" },
+    postalCode: { type: String, default: "" },
   },
   { _id: false },
 );

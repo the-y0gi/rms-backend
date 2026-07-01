@@ -5,6 +5,11 @@ const Expense = require("../../expense/models/expense.model");
 const Deposit = require("../models/deposit.model");
 const logger = require("../../../shared/utils/logger");
 
+const round2 = (num) => {
+  if (typeof num !== "number" || isNaN(num)) return 0;
+  return Math.round((num + Number.EPSILON) * 100) / 100;
+};
+
 // ── Create Order ──────────────────────────────────────────────
 exports.createOrder = async (orderData) => {
   try {
@@ -54,7 +59,13 @@ exports.getAllOrders = async (filters = {}) => {
   try {
     const query = {};
 
-    if (filters.status) query.status = filters.status;
+    if (filters.status) {
+      if (typeof filters.status === 'string' && filters.status.includes(',')) {
+        query.status = { $in: filters.status.split(',') };
+      } else {
+        query.status = filters.status;
+      }
+    }
     if (filters.orderType) query.orderType = filters.orderType;
     if (filters.paymentStatus) query.paymentStatus = filters.paymentStatus;
 
@@ -459,73 +470,73 @@ exports.getSalesSummary = async (filters = {}) => {
         startDate: filters.startDate,
         endDate: filters.endDate || filters.date,
       },
-      completedOrders: { count: completedCount, totalAmount: completedTotal },
-      cancelledOrders: { count: cancelledCount, totalAmount: cancelledTotal },
+      completedOrders: { count: completedCount, totalAmount: round2(completedTotal) },
+      cancelledOrders: { count: cancelledCount, totalAmount: round2(cancelledTotal) },
       refundOrders: { count: 0, totalAmount: 0 },
       financials: {
-        allCategoryTotal: grossSubtotal,
-        subTotal: grossSubtotal,
+        allCategoryTotal: round2(grossSubtotal),
+        subTotal: round2(grossSubtotal),
         deliveryCharges: 0,
         debitCardCharges: 0,
-        discount: grossDiscount,
-        tax: grossTax,
-        grandTotal: grandTotal,
+        discount: round2(grossDiscount),
+        tax: round2(grossTax),
+        grandTotal: round2(grandTotal),
         tips: 0,
-        finalAmount: grandTotal,
+        finalAmount: round2(grandTotal),
       },
       categorySales: Object.entries(categorySales).map(([name, total]) => ({
         name,
-        total,
+        total: round2(total),
       })),
       discountSummary: {
-        percentageDiscount: grossDiscount,
-        total: grossDiscount,
+        percentageDiscount: round2(grossDiscount),
+        total: round2(grossDiscount),
       },
-      taxSummary: { pst: 0, gst: grossTax, hst: 0, total: grossTax },
+      taxSummary: { pst: 0, gst: round2(grossTax), hst: 0, total: round2(grossTax) },
       salesReceived: {
         accountPay: 0,
-        cash: cashTotal,
+        cash: round2(cashTotal),
         creditCardSales: 0,
-        debitCardSales: cardTotal,
-        grandTotal: grandTotal,
+        debitCardSales: round2(cardTotal),
+        grandTotal: round2(grandTotal),
         tips: 0,
-        finalAmount: grandTotal,
+        finalAmount: round2(grandTotal),
       },
       cardTypeReceived: {
-        interac: { total: cardTotal, tips: 0, final: cardTotal },
+        interac: { total: round2(cardTotal), tips: 0, final: round2(cardTotal) },
         mastercard: { total: 0, tips: 0, final: 0 },
         visa: { total: 0, tips: 0, final: 0 },
-        total: { total: cardTotal, tips: 0, final: cardTotal },
+        total: { total: round2(cardTotal), tips: 0, final: round2(cardTotal) },
       },
       orderTypeSummary: {
-        takeout: takeoutTotal,
-        dineIn: dineInTotal,
-        driveThrough: driveThroughTotal,
-        total: grandTotal,
+        takeout: round2(takeoutTotal),
+        dineIn: round2(dineInTotal),
+        driveThrough: round2(driveThroughTotal),
+        total: round2(grandTotal),
       },
       channelSummary: {
-        online: onlineTotal,
-        pos: adjustedPosTotal,
+        online: round2(onlineTotal),
+        pos: round2(adjustedPosTotal),
       },
       expense: rawExpenses.map((e) => ({
         employee: e.expenseType === "store" ? "Store Expense" : e.employeeName || "Manager",
-        pst: e.pst || 0,
-        gst: e.gst || 0,
-        hst: e.hst || 0,
-        total: e.amount || 0,
+        pst: round2(e.pst || 0),
+        gst: round2(e.gst || 0),
+        hst: round2(e.hst || 0),
+        total: round2(e.amount || 0),
         paymentMode: e.paymentMode || "cash",
       })),
       shortageOverage: {
-        cash: shortageOverageCash,
-        card: shortageOverageCard,
-        accountPay: shortageOverageAccountPay,
+        cash: round2(shortageOverageCash),
+        card: round2(shortageOverageCard),
+        accountPay: round2(shortageOverageAccountPay),
       },
-      moneyToBeCollected: { cash: adjustedExpectedCash, card: cardTotal, accountPay: 0 },
+      moneyToBeCollected: { cash: round2(adjustedExpectedCash), card: round2(cardTotal), accountPay: 0 },
       driverReport: [],
       deposit: deposit ? {
-        cashAmount: deposit.cashAmount,
-        cardAmount: deposit.cardAmount,
-        accountPayAmount: deposit.accountPayAmount,
+        cashAmount: round2(deposit.cashAmount),
+        cardAmount: round2(deposit.cardAmount),
+        accountPayAmount: round2(deposit.accountPayAmount),
       } : null,
     };
   } catch (error) {
@@ -552,6 +563,223 @@ exports.saveDeposit = async (depositData) => {
     return deposit;
   } catch (error) {
     logger.error(`Order Service Error: saveDeposit - ${error.message}`);
+    throw error;
+  }
+};
+
+// ── Get Dashboard Metrics Aggregation ──────────────────────────
+exports.getDashboardMetrics = async (filters = {}) => {
+  try {
+    const targetDateStr = filters.date || new Date().toISOString().split("T")[0];
+    
+    // Parse target date and set day boundaries
+    const targetDate = new Date(targetDateStr);
+    
+    const todayStart = new Date(targetDate);
+    todayStart.setHours(0, 0, 0, 0);
+    const todayEnd = new Date(targetDate);
+    todayEnd.setHours(23, 59, 59, 999);
+
+    // 30 Days ago boundaries
+    const past30DaysStart = new Date(targetDate);
+    past30DaysStart.setDate(past30DaysStart.getDate() - 30);
+    past30DaysStart.setHours(0, 0, 0, 0);
+
+    // 1. Fetch Today's Orders
+    const todayOrders = await Order.find({
+      createdAt: { $gte: todayStart, $lte: todayEnd }
+    }).lean();
+
+    const totalOrders = todayOrders.length;
+    let totalEarnings = 0;
+    
+    todayOrders.forEach(order => {
+      if (order.status !== 'cancelled') {
+        totalEarnings += order.total || 0;
+      }
+    });
+
+    // 2. Calculate New vs Returning Customers 
+    let newCustomers = 0;
+    let returningCustomers = 0;
+
+    const todayCustomerOrders = todayOrders.filter(order => {
+      const phone = order.customer?.phone?.trim();
+      const email = order.customer?.email?.trim();
+      return !!(phone || email);
+    });
+
+    for (const order of todayCustomerOrders) {
+      const phone = order.customer?.phone?.trim();
+      const email = order.customer?.email?.trim();
+      
+      const queryOr = [];
+      if (phone) queryOr.push({ 'customer.phone': phone });
+      if (email) queryOr.push({ 'customer.email': email });
+
+      if (queryOr.length > 0) {
+        const hasPrev = await Order.findOne({
+          $or: queryOr,
+          createdAt: { $gte: past30DaysStart, $lt: order.createdAt }
+        }).select('_id').lean();
+
+        if (hasPrev) {
+          returningCustomers += 1;
+        } else {
+          newCustomers += 1;
+        }
+      }
+    }
+
+    // 3. Fetch 30-Day Orders (excluding cancelled) 
+    const orders30Days = await Order.find({
+      createdAt: { $gte: past30DaysStart, $lte: todayEnd },
+      status: { $ne: 'cancelled' }
+    }).select('createdAt items.name items.quantity').lean();
+
+    // 3.1 Popular Days Distribution
+    const daysDataCounts = {
+      Monday: 0,
+      Tuesday: 0,
+      Wednesday: 0,
+      Thursday: 0,
+      Friday: 0,
+      Saturday: 0,
+      Sunday: 0
+    };
+
+    orders30Days.forEach(order => {
+      const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+      const dayName = days[new Date(order.createdAt).getDay()];
+      if (dayName in daysDataCounts) {
+        daysDataCounts[dayName] += 1;
+      }
+    });
+
+    const popularDaysData = Object.entries(daysDataCounts)
+      .map(([name, value]) => ({ name, value }))
+      .filter(item => item.value > 0);
+
+    // 3.2 Popular Food Distribution
+    const foodDataCounts = {};
+    orders30Days.forEach(order => {
+      if (order.items && Array.isArray(order.items)) {
+        order.items.forEach(item => {
+          const itemName = item.name;
+          if (itemName) {
+            foodDataCounts[itemName] = (foodDataCounts[itemName] || 0) + (item.quantity || 1);
+          }
+        });
+      }
+    });
+
+    const sortedFood = Object.entries(foodDataCounts)
+      .map(([name, value]) => ({ name, value }))
+      .sort((a, b) => b.value - a.value);
+
+    let popularFoodData = [];
+    if (sortedFood.length > 6) {
+      popularFoodData = sortedFood.slice(0, 6);
+      const otherVal = sortedFood.slice(6).reduce((sum, item) => sum + item.value, 0);
+      popularFoodData.push({ name: 'Other Items', value: otherVal });
+    } else {
+      popularFoodData = sortedFood;
+    }
+
+    if (popularFoodData.length === 0) {
+      popularFoodData = [{ name: 'No Menu Items Sold', value: 0 }];
+    }
+
+    return {
+      totalOrders,
+      totalEarnings: round2(totalEarnings),
+      newCustomers,
+      returningCustomers,
+      popularDaysData,
+      popularFoodData
+    };
+  } catch (error) {
+    logger.error(`Order Service Error: getDashboardMetrics - ${error.message}`);
+    throw error;
+  }
+};
+
+// ── Get Unique Customers List ──────────────────────────────────
+exports.getUniqueCustomers = async (filters = {}) => {
+  try {
+    const pipeline = [];
+
+    // Filter out orders without a customer name or phone/email
+    pipeline.push({
+      $match: {
+        "customer.name": { $exists: true, $nin: ["", null] },
+        $or: [
+          { "customer.phone": { $exists: true, $nin: ["", "No phone", "No Phone", null] } },
+          { "customer.email": { $exists: true, $nin: ["", "No email", "No Email", null] } }
+        ]
+      }
+    });
+
+    pipeline.push({ $sort: { createdAt: -1 } });
+
+    // Group by phone or email
+    pipeline.push({
+      $group: {
+        _id: {
+          $cond: [
+            { $and: [
+              { $ifNull: ["$customer.phone", false] },
+              { $ne: ["$customer.phone", ""] }
+            ]},
+            "$customer.phone",
+            "$customer.email"
+          ]
+        },
+        firstName: { $first: "$customer.name" },
+        phone: { $first: "$customer.phone" },
+        email: { $first: "$customer.email" },
+        address: { $first: "$customer.address" },
+        postalCode: { $first: "$customer.postalCode" },
+        updatedDate: { $first: "$updatedAt" },
+        lastOrderDate: { $first: "$createdAt" }
+      }
+    });
+
+    // Sort customers by lastOrderDate descending
+    pipeline.push({ $sort: { lastOrderDate: -1 } });
+
+    let results = await Order.aggregate(pipeline);
+
+    let customers = results.map(c => {
+      const nameParts = (c.firstName || "").trim().split(/\s+/);
+      const fName = nameParts[0] || "";
+      const lName = nameParts.slice(1).join(" ") || "";
+      return {
+        firstName: fName,
+        lastName: lName,
+        phone: c.phone || "",
+        email: c.email || "",
+        updatedDate: c.updatedDate || c.lastOrderDate,
+        lastOrderDate: c.lastOrderDate,
+        address: c.address || "",
+        postalCode: c.postalCode || ""
+      };
+    });
+
+    if (filters.date) {
+      const targetDateStr = filters.date.split("T")[0];
+      customers = customers.filter(c => {
+        if (!c.lastOrderDate) return false;
+        const d = new Date(c.lastOrderDate);
+        const localDate = new Date(d.getTime() - (d.getTimezoneOffset() * 60000));
+        const cDateStr = localDate.toISOString().slice(0, 10);
+        return cDateStr === targetDateStr;
+      });
+    }
+
+    return customers;
+  } catch (error) {
+    logger.error(`Order Service Error: getUniqueCustomers - ${error.message}`);
     throw error;
   }
 };

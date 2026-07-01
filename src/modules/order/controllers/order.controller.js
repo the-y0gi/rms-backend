@@ -39,6 +39,28 @@ exports.getSalesSummary = async (req, res) => {
   }
 };
 
+// GET /api/orders/dashboard-metrics
+exports.getDashboardMetrics = async (req, res) => {
+  try {
+    const { date } = req.query;
+    const metrics = await orderService.getDashboardMetrics({ date });
+    res.status(200).json({ success: true, data: metrics });
+  } catch (error) {
+    handleError(res, error, 500);
+  }
+};
+
+// GET /api/orders/customers
+exports.getUniqueCustomers = async (req, res) => {
+  try {
+    const { date } = req.query;
+    const customers = await orderService.getUniqueCustomers({ date });
+    res.status(200).json({ success: true, data: customers });
+  } catch (error) {
+    handleError(res, error, 500);
+  }
+};
+
 // GET /api/orders/:id
 exports.getOrderById = async (req, res) => {
   try {
