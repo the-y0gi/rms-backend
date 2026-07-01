@@ -292,13 +292,20 @@ exports.getSalesSummary = async (filters = {}) => {
       query.createdAt = { $gte: start, $lte: end };
     }
 
-    const orders = await Order.find(query).lean();
+    // Retrieve only necessary fields via database query projection
+    const orders = await Order.find(query)
+      .select("status total subtotal tax discount orderType orderSource paymentStatus payments items")
+      .lean();
 
-    // Fetch products to build category lookup map
+    // Fetch products to build category lookup map with projection
     const productCategoryMap = {};
     try {
-      const products = await Product.find().populate("categoryId").lean();
-      products.forEach((p) => {
+      const products = await Product.find()
+        .select("_id categoryId")
+        .populate({ path: "categoryId", select: "name" })
+        .lean();
+      
+      for (const p of products) {
         const prodId = p._id ? p._id.toString() : "";
         const catName =
           p.categoryId && typeof p.categoryId === "object"
@@ -307,7 +314,7 @@ exports.getSalesSummary = async (filters = {}) => {
         if (prodId && catName) {
           productCategoryMap[prodId] = catName;
         }
-      });
+      }
     } catch (err) {
       logger.warn(`Could not build product category lookup: ${err.message}`);
     }
@@ -340,7 +347,8 @@ exports.getSalesSummary = async (filters = {}) => {
     let cashTotal = 0;
     let cardTotal = 0;
 
-    orders.forEach((order) => {
+    // Standard optimized loop (avoiding callback contexts)
+    for (const order of orders) {
       if (order.status === "cancelled") {
         cancelledCount += 1;
         cancelledTotal += order.total || 0;
@@ -366,10 +374,10 @@ exports.getSalesSummary = async (filters = {}) => {
         // Payments
         if (order.paymentStatus === "paid") {
           if (order.payments && order.payments.length > 0) {
-            order.payments.forEach((p) => {
+            for (const p of order.payments) {
               if (p.method === "cash") cashTotal += p.amount;
               else cardTotal += p.amount;
-            });
+            }
           } else {
             // fallback if payments array is missing/empty (e.g. old orders)
             cashTotal += order.total;
@@ -378,10 +386,8 @@ exports.getSalesSummary = async (filters = {}) => {
 
         // Category breakdown from items
         if (order.items && Array.isArray(order.items)) {
-          order.items.forEach((item) => {
-            const itemProdId = item.menuItemId
-              ? item.menuItemId.toString()
-              : "";
+          for (const item of order.items) {
+            const itemProdId = item.menuItemId || "";
             const catName =
               item.categoryName ||
               item.category ||
@@ -390,10 +396,10 @@ exports.getSalesSummary = async (filters = {}) => {
             categorySales[catName] =
               (categorySales[catName] || 0) +
               (item.totalPrice || item.basePrice * item.quantity);
-          });
+          }
         }
       }
-    });
+    }
 
     // Query daily deposit record
     let targetDateStr = "";
@@ -440,13 +446,16 @@ exports.getSalesSummary = async (filters = {}) => {
           expQuery.expenseDate = { $gte: start, $lte: end };
         }
       }
-      const expensesList = await Expense.find(expQuery).lean();
-      expensesList.forEach((e) => {
+      const expensesList = await Expense.find(expQuery)
+        .select("paymentMode amount expenseType employeeName pst gst hst")
+        .lean();
+      
+      for (const e of expensesList) {
         rawExpenses.push(e);
         if (e.paymentMode !== "card") {
           totalCashExpense += e.amount || 0;
         }
-      });
+      }
     } catch (err) {
       logger.warn(`Could not query daily expenses: ${err.message}`);
     }
@@ -585,43 +594,73 @@ exports.getDashboardMetrics = async (filters = {}) => {
     past30DaysStart.setDate(past30DaysStart.getDate() - 30);
     past30DaysStart.setHours(0, 0, 0, 0);
 
-    // 1. Fetch Today's Orders
-    const todayOrders = await Order.find({
-      createdAt: { $gte: todayStart, $lte: todayEnd }
-    }).lean();
+    // Fetch all orders in the 30-day window in one query with projection
+    const orders30Days = await Order.find({
+      createdAt: { $gte: past30DaysStart, $lte: todayEnd }
+    })
+    .select("createdAt status total customer.phone customer.email items.name items.quantity")
+    .sort({ createdAt: 1 })
+    .lean();
+
+    const todayOrders = [];
+    const nonCancelled30Days = [];
+    
+    const phoneToEarliestDate = new Map();
+    const emailToEarliestDate = new Map();
+
+    for (const order of orders30Days) {
+      const orderDate = new Date(order.createdAt);
+      
+      // Store earliest order date for phone and email
+      const phone = order.customer?.phone?.trim();
+      const email = order.customer?.email?.trim();
+      if (phone && !phoneToEarliestDate.has(phone)) {
+        phoneToEarliestDate.set(phone, order.createdAt);
+      }
+      if (email && !emailToEarliestDate.has(email)) {
+        emailToEarliestDate.set(email, order.createdAt);
+      }
+
+      if (orderDate >= todayStart && orderDate <= todayEnd) {
+        todayOrders.push(order);
+      }
+      if (order.status !== 'cancelled') {
+        nonCancelled30Days.push(order);
+      }
+    }
 
     const totalOrders = todayOrders.length;
     let totalEarnings = 0;
     
-    todayOrders.forEach(order => {
+    for (const order of todayOrders) {
       if (order.status !== 'cancelled') {
         totalEarnings += order.total || 0;
       }
-    });
+    }
 
-    // 2. Calculate New vs Returning Customers 
+    // Calculate New vs Returning Customers in memory (no N+1 queries)
     let newCustomers = 0;
     let returningCustomers = 0;
 
-    const todayCustomerOrders = todayOrders.filter(order => {
-      const phone = order.customer?.phone?.trim();
-      const email = order.customer?.email?.trim();
-      return !!(phone || email);
-    });
-
-    for (const order of todayCustomerOrders) {
+    for (const order of todayOrders) {
       const phone = order.customer?.phone?.trim();
       const email = order.customer?.email?.trim();
       
-      const queryOr = [];
-      if (phone) queryOr.push({ 'customer.phone': phone });
-      if (email) queryOr.push({ 'customer.email': email });
-
-      if (queryOr.length > 0) {
-        const hasPrev = await Order.findOne({
-          $or: queryOr,
-          createdAt: { $gte: past30DaysStart, $lt: order.createdAt }
-        }).select('_id').lean();
+      if (phone || email) {
+        let hasPrev = false;
+        
+        if (phone && phoneToEarliestDate.has(phone)) {
+          const earliest = phoneToEarliestDate.get(phone);
+          if (new Date(earliest) < new Date(order.createdAt)) {
+            hasPrev = true;
+          }
+        }
+        if (!hasPrev && email && emailToEarliestDate.has(email)) {
+          const earliest = emailToEarliestDate.get(email);
+          if (new Date(earliest) < new Date(order.createdAt)) {
+            hasPrev = true;
+          }
+        }
 
         if (hasPrev) {
           returningCustomers += 1;
@@ -631,13 +670,7 @@ exports.getDashboardMetrics = async (filters = {}) => {
       }
     }
 
-    // 3. Fetch 30-Day Orders (excluding cancelled) 
-    const orders30Days = await Order.find({
-      createdAt: { $gte: past30DaysStart, $lte: todayEnd },
-      status: { $ne: 'cancelled' }
-    }).select('createdAt items.name items.quantity').lean();
-
-    // 3.1 Popular Days Distribution
+    // Popular Days Distribution
     const daysDataCounts = {
       Monday: 0,
       Tuesday: 0,
@@ -648,30 +681,30 @@ exports.getDashboardMetrics = async (filters = {}) => {
       Sunday: 0
     };
 
-    orders30Days.forEach(order => {
-      const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    for (const order of nonCancelled30Days) {
       const dayName = days[new Date(order.createdAt).getDay()];
       if (dayName in daysDataCounts) {
         daysDataCounts[dayName] += 1;
       }
-    });
+    }
 
     const popularDaysData = Object.entries(daysDataCounts)
       .map(([name, value]) => ({ name, value }))
       .filter(item => item.value > 0);
 
-    // 3.2 Popular Food Distribution
+    // Popular Food Distribution
     const foodDataCounts = {};
-    orders30Days.forEach(order => {
+    for (const order of nonCancelled30Days) {
       if (order.items && Array.isArray(order.items)) {
-        order.items.forEach(item => {
+        for (const item of order.items) {
           const itemName = item.name;
           if (itemName) {
             foodDataCounts[itemName] = (foodDataCounts[itemName] || 0) + (item.quantity || 1);
           }
-        });
+        }
       }
-    });
+    }
 
     const sortedFood = Object.entries(foodDataCounts)
       .map(([name, value]) => ({ name, value }))
@@ -704,21 +737,30 @@ exports.getDashboardMetrics = async (filters = {}) => {
   }
 };
 
+
 // ── Get Unique Customers List ──────────────────────────────────
 exports.getUniqueCustomers = async (filters = {}) => {
   try {
     const pipeline = [];
 
-    // Filter out orders without a customer name or phone/email
-    pipeline.push({
-      $match: {
-        "customer.name": { $exists: true, $nin: ["", null] },
-        $or: [
-          { "customer.phone": { $exists: true, $nin: ["", "No phone", "No Phone", null] } },
-          { "customer.email": { $exists: true, $nin: ["", "No email", "No Email", null] } }
-        ]
-      }
-    });
+    const matchQuery = {
+      "customer.name": { $exists: true, $nin: ["", null] },
+      $or: [
+        { "customer.phone": { $exists: true, $nin: ["", "No phone", "No Phone", null] } },
+        { "customer.email": { $exists: true, $nin: ["", "No email", "No Email", null] } }
+      ]
+    };
+
+    // Filter by date in the database layer (leveraging indexes) rather than in application memory
+    if (filters.date) {
+      const start = new Date(filters.date);
+      start.setHours(0, 0, 0, 0);
+      const end = new Date(filters.date);
+      end.setHours(23, 59, 59, 999);
+      matchQuery.createdAt = { $gte: start, $lte: end };
+    }
+
+    pipeline.push({ $match: matchQuery });
 
     pipeline.push({ $sort: { createdAt: -1 } });
 
@@ -765,17 +807,6 @@ exports.getUniqueCustomers = async (filters = {}) => {
         postalCode: c.postalCode || ""
       };
     });
-
-    if (filters.date) {
-      const targetDateStr = filters.date.split("T")[0];
-      customers = customers.filter(c => {
-        if (!c.lastOrderDate) return false;
-        const d = new Date(c.lastOrderDate);
-        const localDate = new Date(d.getTime() - (d.getTimezoneOffset() * 60000));
-        const cDateStr = localDate.toISOString().slice(0, 10);
-        return cDateStr === targetDateStr;
-      });
-    }
 
     return customers;
   } catch (error) {

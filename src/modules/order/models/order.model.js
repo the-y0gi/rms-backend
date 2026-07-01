@@ -216,5 +216,7 @@ orderSchema.statics.previewNextOrderNumber = async function (orderType) {
 };
 
 orderSchema.index({ createdAt: -1 });
+orderSchema.index({ "customer.phone": 1 }, { sparse: true });
+orderSchema.index({ "customer.email": 1 }, { sparse: true });
 
 module.exports = mongoose.model("Order", orderSchema);

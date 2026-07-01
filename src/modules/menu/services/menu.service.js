@@ -4,6 +4,11 @@ const Product = require('../models/product.model');
 const cloudinary = require('../../../config/cloudinary.config');
 const logger = require('../../../shared/utils/logger');
 
+let cachedPOSMenuFeed = null;
+const clearPOSMenuCache = () => {
+  cachedPOSMenuFeed = null;
+};
+
 // category services
 
 exports.getAllCategories = async () => {
@@ -22,7 +27,9 @@ exports.createCategory = async (categoryData) => {
     if (existing) {
       throw new Error('Slug already exists.');
     }
-    return await Category.create(categoryData);
+    const category = await Category.create(categoryData);
+    clearPOSMenuCache();
+    return category;
   } catch (error) {
     logger.error(`Menu Service Error: createCategory - ${error.message}`);
     throw error;
@@ -35,6 +42,7 @@ exports.updateCategory = async (id, categoryData) => {
     if (!category) {
       throw new Error('Category not found.');
     }
+    clearPOSMenuCache();
     return category;
   } catch (error) {
     logger.error(`Menu Service Error: updateCategory - ${error.message}`);
@@ -48,6 +56,7 @@ exports.deleteCategory = async (id) => {
     if (!category) {
       throw new Error('Category not found.');
     }
+    clearPOSMenuCache();
     return category;
   } catch (error) {
     logger.error(`Menu Service Error: deleteCategory - ${error.message}`);
@@ -68,7 +77,9 @@ exports.getAllModifierGroups = async () => {
 
 exports.createModifierGroup = async (groupData) => {
   try {
-    return await ModifierGroup.create(groupData);
+    const group = await ModifierGroup.create(groupData);
+    clearPOSMenuCache();
+    return group;
   } catch (error) {
     logger.error(`Menu Service Error: createModifierGroup - ${error.message}`);
     throw error;
@@ -81,6 +92,7 @@ exports.updateModifierGroup = async (id, groupData) => {
     if (!group) {
       throw new Error('Modifier group not found.');
     }
+    clearPOSMenuCache();
     return group;
   } catch (error) {
     logger.error(`Menu Service Error: updateModifierGroup - ${error.message}`);
@@ -90,10 +102,11 @@ exports.updateModifierGroup = async (id, groupData) => {
 
 exports.deleteModifierGroup = async (id) => {
   try {
-    const group = await ModifierGroup.findByIdAndDelete(id);
+    const group = await ModifierGroup.deleteModifierGroup || await ModifierGroup.findByIdAndDelete(id);
     if (!group) {
       throw new Error('Modifier group not found.');
     }
+    clearPOSMenuCache();
     return group;
   } catch (error) {
     logger.error(`Menu Service Error: deleteModifierGroup - ${error.message}`);
@@ -123,6 +136,7 @@ exports.getAllProducts = async () => {
 exports.createProduct = async (productData) => {
   try {
     const product = await Product.create(productData);
+    clearPOSMenuCache();
     return await Product.findById(product._id)
       .populate('categoryId')
       .populate({
@@ -150,6 +164,7 @@ exports.updateProduct = async (id, productData) => {
     if (!product) {
       throw new Error('Product not found.');
     }
+    clearPOSMenuCache();
     return product;
   } catch (error) {
     logger.error(`Menu Service Error: updateProduct - ${error.message}`);
@@ -163,6 +178,7 @@ exports.deleteProduct = async (id) => {
     if (!product) {
       throw new Error('Product not found.');
     }
+    clearPOSMenuCache();
     return product;
   } catch (error) {
     logger.error(`Menu Service Error: deleteProduct - ${error.message}`);
@@ -174,6 +190,10 @@ exports.deleteProduct = async (id) => {
 
 exports.getPOSMenuFeed = async () => {
   try {
+    if (cachedPOSMenuFeed) {
+      return cachedPOSMenuFeed;
+    }
+
     const categories = await Category.find({ isActive: true }).sort({ displayOrder: 1 });
     const products = await Product.find({ isActive: true })
       .populate({
@@ -183,7 +203,7 @@ exports.getPOSMenuFeed = async () => {
         }
       });
     
-    return {
+    const feed = {
       categories: categories.map(cat => ({
         id: cat._id.toHexString(),
         name: cat.name,
@@ -233,6 +253,9 @@ exports.getPOSMenuFeed = async () => {
         }))
       }))
     };
+
+    cachedPOSMenuFeed = feed;
+    return feed;
   } catch (error) {
     logger.error(`Menu Service Error: getPOSMenuFeed - ${error.message}`);
     throw error;
